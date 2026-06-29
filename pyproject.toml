@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ig-pipeline"
+version = "2.0.0"
+description = "Medallion-architecture ETL pipeline: Apify Instagram scrape → DuckDB → Gemini enrichment"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "evanods"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "duckdb>=1.0",
+    "httpx",
+    "google-genai",
+    "pydantic>=2.0",
+    "python-dotenv",
+    "tenacity",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "pytest-httpx", "respx"]
+
+[project.urls]
+Homepage = "https://github.com/evanods/ig-pipeline"
+Repository = "https://github.com/evanods/ig-pipeline"
+Issues = "https://github.com/evanods/ig-pipeline/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ig_pipeline"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
