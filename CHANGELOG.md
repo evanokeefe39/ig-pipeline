@@ -1,5 +1,42 @@
 # Changelog
 
+
+## 2.2.0 (2026-06-29) — Competitive analysis foundation
+
+### Schema evolution
+- **silver_posts** expanded: owner_id, owner_username, likes_count, comments_count,
+  video_play_count, video_view_count, timestamp, hashtags, has_engagement_bait.
+- **dim_time** table: date spine from all post timestamps (populate_dim_time).
+- **dim_profile** table: SCD2 from unique owners in silver_posts (populate_dim_profile).
+- **taxonomy_terms** table: SCD2 stub for Phase 3 MDM registry.
+
+### Gold v3 schema
+- SCHEMA_VERSION 2 → 3.
+- **Admiralty Code** (A1-F6): source reliability × information credibility replaces value_score.
+- **Freeform taxonomy**: domain, subdomain, topic, subtopic, content_type, style, format —
+  no controlled vocabularies, taxonomy emerges from data.
+- **Two-JSON extraction**: educational_json (what the post teaches) + actionable_json
+  (what you can go do) replace 6 separate extraction arrays.
+- **Engagement bait detection** (Silver): regex on caption — comment X, DM me, link in bio.
+  Zero LLM cost.
+
+### Analytics views (5)
+- **fact_post**: star schema fact view joining silver_posts + gold_analyses + dim_profile + dim_time.
+- **profile_stats**: per-owner engagement aggregations (post count, avg likes/comments/plays).
+- **topic_stats**: per-topic cross-profile aggregations with quartile distribution.
+- **profile_topic_edges**: graph edge export surface — profile → topic with engagement.
+- **profile_resource_edges**: graph edge export surface — profile → resource (tool co-occurrence).
+
+### Testing
+- 18 tests: silver column extraction, engagement bait detection (6 patterns), dim table
+  population + idempotence, fact_post gold/NULL fields + engagement ratios, profile_stats
+  aggregation, topic_stats grouping, edge views with resources, dim_time profile count.
+- All tests use in-memory DuckDB via DI pattern.
+
+### Plan
+- `tasks/plans/competitive-analysis.md`: full requirements, architecture (star schema + MDM
+  taxonomy registry), gap analysis, 7-phase rollout.
+
 ## 2.1.0 (2026-06-29) — Pipeline hardening
 
 ### Correctness fixes

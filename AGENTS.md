@@ -21,40 +21,38 @@ Trigger: `/ig` — Claude imports `ig_pipeline` functions directly in `eval` cel
 - **Bronze** — immutable raw ingest. Watermarked by run_id + actor. Never modifies after write.
 - **Silver** — DuckDB `INSERT OR REPLACE` by post_id. Latest dataset wins. Media hardlinked.
 - **Gold** — Gemini enrichment. Idempotent and resumable — skips already-analysed posts.
-- **Query** — DuckDB reads gold JSON directly: `SELECT * FROM read_json('data/gold/posts/*/enriched.json')`.
+- **Query** — DuckDB views (fact_post, profile_stats, topic_stats, edge views).
+  Never query gold JSON directly.
 
 ## State tracking
 
-DuckDB at `data/pipeline.db`. Tables: `bronze_ingests`, `silver_posts`,
-`silver_progress`, `gold_analyses`. All operations are idempotent.
+DuckDB at `data/pipeline.db`. Tables:
+- `bronze_ingests`, `silver_posts`, `silver_progress`, `gold_analyses`
+- `dim_time` (date spine), `dim_profile` (SCD2, profile metadata), `taxonomy_terms` (SCD2 stub for Phase 3 MDM)
 
-## Watermarking
+DuckDB views:
+- `fact_post` — star schema fact view (silver + gold + dims)
+- `profile_stats` — per-owner engagement aggregations
+- `topic_stats` — per-topic cross-profile aggregations
+- `profile_topic_edges` — graph export: profile → topic
+- `profile_resource_edges` — graph export: profile → resource (tool co-occurrence)
 
-- `bronze_ingests` records `run_id` and `actor` for every ingested Apify dataset.
-- `scripts/run_pipeline.py` queries `list_runs()` and skips already-ingested datasets.
-- `silver_posts.source_dataset` tracks which bronze dataset produced each silver record.
+All operations are idempotent. Run `populate_dim_time()`, `populate_dim_profile()`,
+then `refresh_views()` after enrichment.
+
+## Gold v3 schema (SCHEMA_VERSION=3)
+
+- **Admiralty Code** (A1-F6): source reliability × information credibility
+- **Freeform taxonomy**: domain, subdomain, topic, subtopic, content_type, style, format
+- **educational_json**: {summary, workflow[{step,tool,detail}], concepts[{term,explanation}], principles[], techniques[]}
+- **actionable_json**: {summary, resources[{name,url,type,purpose}], tools[], guides[], downloads[]}
+- **has_engagement_bait**: regex on caption in silver (no LLM cost)
+
+## Profile metadata
+
+Raw Apify post data includes `ownerId`, `ownerUsername`, `ownerFullName` ONLY.
+Follower count, bio, profile category are NOT in post-scrape output.
+Phase 5 will require a separate Apify profile-scraper actor.
+`profile_stats` view computes aggregate stats from our scraped posts.
 
 ## Test conventions
-
-```python
-def test_something():
-    db = get_db(":memory:")
-    db.execute("INSERT INTO ...")       # seed
-    result = function_under_test(db=db)  # inject
-    assert result.expected == actual     # verify
-```
-
-No `monkeypatch` for DB access. Monkeypatch only for external APIs and filesystem paths.
-
-## Patterns learned (v2 build + hardening)
-
-- **DI for DB**: All pipeline functions accept `db=None`. Tests inject `:memory:`.
-- **DuckDB timestamps**: `CURRENT_TIMESTAMP`, not `datetime('now')`.
-- **Module imports**: `from .db import BRONZE_DIR` captures value at import time. Use `_db.BRONZE_DIR`.
-- **DuckDB upsert**: `INSERT OR REPLACE` by primary key for dedup. No SELECT-check pattern needed.
-- **Mixed carousels**: Return all slides, interleave uploaded videos + inline images.
-- **Parameterized SQL**: Never f-string SQL. Use `?` placeholders with params tuples.
-- **Crash-safe batch tracking**: Track multi-item batches at the batch level (`silver_progress`). Never infer completion from individual item state.
-- **DuckDB row counts**: `db.execute()` is always truthy — use `RETURNING` clause, never check execute result.
-- **HTTP retries**: Every external HTTP call gets retries. Use `tenacity` with a specific retry condition function (`_is_retryable`).
-- **Dead code removal**: Schema tables, SQL files, and pycache artifacts that aren't wired in are speculative overproduction. Ship only what's exercised.
