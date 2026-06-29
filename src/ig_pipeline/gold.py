@@ -646,21 +646,43 @@ def populate_dim_time(*, db: duckdb.DuckDBPyConnection | None = None) -> int:
 
 
 def populate_dim_profile(*, db: duckdb.DuckDBPyConnection | None = None) -> int:
-    """Seed dim_profile from unique owners in silver_posts."""
+    """Seed dim_profile from silver_posts, preferring metaData when available.
+
+    For each owner, takes the latest post's metaData to populate
+    follower_count, bio, is_verified, profile_category, related_profiles.
+    Falls back to owner_id/owner_username only when no metaData exists.
+    """
     if db is None:
         db = _db.get_db()
     db.execute("DELETE FROM dim_profile")
     db.execute("""
-        INSERT INTO dim_profile (profile_key, owner_id, owner_username, is_current, effective_from)
+        INSERT INTO dim_profile (
+            profile_key, owner_id, owner_username,
+            follower_count, posts_count_ig, bio, is_verified,
+            profile_category, external_url, related_profiles,
+            is_current, effective_from
+        )
+        WITH latest_post AS (
+            SELECT DISTINCT ON (owner_id)
+                owner_id, owner_username, meta_data, timestamp
+            FROM silver_posts
+            WHERE owner_id IS NOT NULL AND owner_id != ''
+            ORDER BY owner_id, timestamp DESC NULLS LAST
+        )
         SELECT
-            ROW_NUMBER() OVER (ORDER BY owner_id) AS profile_key,
-            owner_id, owner_username,
+            ROW_NUMBER() OVER (ORDER BY lp.owner_id) AS profile_key,
+            lp.owner_id,
+            lp.owner_username,
+            CAST(json_extract_string(lp.meta_data, '$.followersCount') AS INTEGER) AS follower_count,
+            CAST(json_extract_string(lp.meta_data, '$.postsCount') AS INTEGER) AS posts_count_ig,
+            json_extract_string(lp.meta_data, '$.biography') AS bio,
+            json_extract_string(lp.meta_data, '$.verified') = 'true' AS is_verified,
+            json_extract_string(lp.meta_data, '$.businessCategoryName') AS profile_category,
+            json_extract_string(lp.meta_data, '$.externalUrl') AS external_url,
+            json_extract(lp.meta_data, '$.relatedProfiles') AS related_profiles,
             true AS is_current,
             CURRENT_TIMESTAMP AS effective_from
-        FROM (
-            SELECT DISTINCT owner_id, owner_username
-            FROM silver_posts WHERE owner_id IS NOT NULL AND owner_id != ''
-        )
+        FROM latest_post lp
     """)
     count = db.execute("SELECT COUNT(*) FROM dim_profile").fetchone()[0]
     log.info("dim_profile seeded: %d profiles", count)

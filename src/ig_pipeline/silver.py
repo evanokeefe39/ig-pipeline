@@ -92,13 +92,14 @@ def deduplicate_all(*, db: duckdb.DuckDBPyConnection | None = None) -> SilverRes
             )
             hashtags_json = json.dumps(post.get("hashtags") or [])
             has_bait = _detect_engagement_bait(post.get("caption") or "")
+            meta_json = json.dumps(post.get("metaData") or {}) if post.get("metaData") else None
             db.execute(
                 """INSERT OR REPLACE INTO silver_posts
                    (post_id, shortcode, url, caption, owner_id, owner_username,
                     likes_count, comments_count, video_play_count, video_view_count,
-                    timestamp, hashtags, has_engagement_bait,
+                    timestamp, hashtags, meta_data, has_engagement_bait,
                     media_files, media_count, source_dataset)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     post_id,
                     post.get("shortCode") or "",
@@ -112,6 +113,7 @@ def deduplicate_all(*, db: duckdb.DuckDBPyConnection | None = None) -> SilverRes
                     post.get("videoViewCount") or 0,
                     post.get("timestamp") or None,
                     hashtags_json,
+                    meta_json,
                     has_bait,
                     files_json,
                     posted_media,

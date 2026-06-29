@@ -409,10 +409,17 @@ queue operational.  All views resolve canonical terms.
 
 ### Phase 5 — Profile Scraping (deferred)
 
-- Scrape profile metadata for 369 unique owners (follower_count, bio,
-  profile_category)
-- ETL into `dim_profile` as new SCD2 rows with effective dates
-- Update benchmarking views to use engagement rate
+- The Apify Instagram scraper includes `metaData` (followersCount, postsCount,
+  biography, verified, businessCategoryName, relatedProfiles) when given
+  **profile URLs** (e.g. `instagram.com/bywaviboy`), but NOT when given
+  **individual post URLs**.
+- Strategy: feed all 369 unique owner profile URLs to the Apify actor.
+  Extract `metaData` from the resulting posts into `silver_posts.meta_data`.
+  `populate_dim_profile` already reads the latest metaData per owner.
+- We already have coverage for 3 profiles (bywaviboy, vinny_creative,
+  electroformaint) from the existing profile-scraped datasets.
+- `relatedProfiles` from metaData is Instagram's built-in profile similarity
+  graph — could seed `profile_profile_edges` view in Phase 6.
 
 ### Phase 6 — Graph DB (deferred)
 
