@@ -238,3 +238,25 @@ per owner already.
   refresh_views; returns counts for each step
 
 Tests: `tests/test_profile_scrape.py` (8 tests, all passing).
+
+## Completed runs
+
+| Run ID | Dataset | Type | Profiles | Results | Cost | Status |
+|---|---|---|---|---|---|---|
+| `FSM8nCAT9JnD5J760` | `pkKweRqfCBg7Sy3J3` | Phase 1a (posts, 80/ea) | 7 | 560 | ~$1.29 | Ingested 500, no metaData |
+| `ggBidYiaFlOX99Oqn` | `o44ZGN3WOEuMzCgcf` | Profile details | 368 | 368 | ~$0.99 | ✅ 368 profiles, 99% coverage |
+
+**Key finding:** `resultsType: "posts"` on profile URLs does NOT return profile
+metadata. Switched to `resultsType: "details"` — one run covered all 368 profiles
+for ~$0.99 vs the $13.69 originally budgeted for 6 post-scraping batches.
+
+Phases 2a/2b/3 (post scraping for metadata) are **no longer needed** — profile
+metadata is fully backfilled. These phases remain available if more post content
+is wanted for enrichment.
+
+## Known issues
+
+- `stream_dataset` corrupted 154/498 lines in the details bronze file (control
+  characters in bio fields). Workaround: re-fetched clean JSON from API.
+- `deduplicate_all()` is monolithic — need per-dataset `silver_dataset()`.
+- No ETL framework — evaluating dlt for incremental loading + watermarks.
