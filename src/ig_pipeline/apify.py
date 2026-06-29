@@ -86,7 +86,9 @@ def _post_with_retry(path: str, token: str, body: Any = None, **params: Any) -> 
 
 # ── Extraction ────────────────────────────────────────────────────────────
 
-def trigger_run(actor: str, urls: list[str], *, token: str) -> RunInfo:
+def trigger_run(actor: str, urls: list[str], *, token: str,
+                results_limit: int = 1,
+                results_type: str = "posts") -> RunInfo:
     """Start an actor run. Returns immediately with run_id and dataset_id.
 
     The dataset_id is available before the run finishes — Apify creates it
@@ -94,8 +96,8 @@ def trigger_run(actor: str, urls: list[str], *, token: str) -> RunInfo:
     """
     body = {
         "directUrls": urls,
-        "resultsType": "posts",
-        "resultsLimit": 1,
+        "resultsType": results_type,
+        "resultsLimit": results_limit,
         "proxy": {"useApifyProxy": True},
     }
     result = _post(f"acts/{actor}/runs", token, body=body)
