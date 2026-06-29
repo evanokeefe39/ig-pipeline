@@ -617,38 +617,149 @@ def enrich_posts(
     return result
 
 
-# ── Views ───────────────────────────────────────────────────────────────────
 
-def refresh_views(*, db: duckdb.DuckDBPyConnection | None = None) -> dict:
-    """Create/replace DuckDB views over gold data."""
+
+# ── Dimension seeding ─────────────────────────────────────────────────────
+
+def populate_dim_time(*, db: duckdb.DuckDBPyConnection | None = None) -> int:
+    """Populate dim_time with dates covering all post timestamps."""
     if db is None:
         db = _db.get_db()
     db.execute("""
-        CREATE OR REPLACE VIEW posts AS
+        INSERT OR REPLACE INTO dim_time
+        WITH dates AS (
+            SELECT DISTINCT CAST(timestamp AS DATE) AS d
+            FROM silver_posts WHERE timestamp IS NOT NULL
+        )
         SELECT
-            g.post_id,
-            s.shortcode,
-            s.url,
-            s.caption,
-            g.analysed_at,
-            json_extract_string(g.result_json, '$.analysis.is_educational') = 'true' AS is_educational,
-            json_extract_string(g.result_json, '$.analysis.is_actionable') = 'true' AS is_actionable,
-            json_extract_string(g.result_json, '$.analysis.admirality') AS admirality,
-            json_extract_string(g.result_json, '$.analysis.domain') AS domain,
-            json_extract_string(g.result_json, '$.analysis.subdomain') AS subdomain,
-            json_extract_string(g.result_json, '$.analysis.topic') AS topic,
-            json_extract_string(g.result_json, '$.analysis.subtopic') AS subtopic,
-            json_extract_string(g.result_json, '$.analysis.content_type') AS content_type,
-            json_extract_string(g.result_json, '$.analysis.style') AS style,
-            json_extract_string(g.result_json, '$.analysis.format') AS format,
-            json(g.result_json) -> '$.analysis.educational_json' AS educational_json,
-            json(g.result_json) -> '$.analysis.actionable_json' AS actionable_json,
-            json(g.result_json) -> '$.analysis.transcript' AS transcript,
-            json(g.result_json) AS result_json
-        FROM gold_analyses g
-        JOIN silver_posts s USING (post_id)
-        WHERE g.status = 'analysed'
+            CAST(STRFTIME(d, '%Y%m%d') AS INTEGER) AS time_key,
+            d AS date,
+            CAST(STRFTIME(d, '%m') AS INTEGER) AS month,
+            CAST((CAST(STRFTIME(d, '%m') AS INTEGER) - 1) / 3 + 1 AS INTEGER) AS quarter,
+            CAST(STRFTIME(d, '%Y') AS INTEGER) AS year
+        FROM dates WHERE d IS NOT NULL
     """)
+    count = db.execute("SELECT COUNT(*) FROM dim_time").fetchone()[0]
+    log.info("dim_time populated: %d dates", count)
     db.commit()
-    log.info("Views refreshed")
-    return {"views_created": 1}
+    return count
+
+
+def populate_dim_profile(*, db: duckdb.DuckDBPyConnection | None = None) -> int:
+    """Seed dim_profile from unique owners in silver_posts."""
+    if db is None:
+        db = _db.get_db()
+    db.execute("DELETE FROM dim_profile")
+    db.execute("""
+        INSERT INTO dim_profile (profile_key, owner_id, owner_username, is_current, effective_from)
+        SELECT
+            ROW_NUMBER() OVER (ORDER BY owner_id) AS profile_key,
+            owner_id, owner_username,
+            true AS is_current,
+            CURRENT_TIMESTAMP AS effective_from
+        FROM (
+            SELECT DISTINCT owner_id, owner_username
+            FROM silver_posts WHERE owner_id IS NOT NULL AND owner_id != ''
+        )
+    """)
+    count = db.execute("SELECT COUNT(*) FROM dim_profile").fetchone()[0]
+    log.info("dim_profile seeded: %d profiles", count)
+    db.commit()
+    return count
+
+
+# ── Views ───────────────────────────────────────────────────────────────────
+
+def refresh_views(*, db: duckdb.DuckDBPyConnection | None = None) -> dict:
+    """Create/replace all DuckDB analytical views over silver + gold data."""
+    if db is None:
+        db = _db.get_db()
+
+    # 1. Fact view
+    db.execute("""CREATE OR REPLACE VIEW fact_post AS
+        SELECT sp.post_id, dp.profile_key, dt.time_key,
+               sp.shortcode, sp.url,
+               sp.likes_count, sp.comments_count,
+               sp.video_play_count, sp.video_view_count,
+               CASE WHEN sp.video_view_count > 0
+                    THEN CAST(sp.video_play_count AS FLOAT) / sp.video_view_count END AS play_view_ratio,
+               CASE WHEN sp.likes_count > 0
+                    THEN CAST(sp.comments_count AS FLOAT) / sp.likes_count END AS comment_like_ratio,
+               ga.schema_version, sp.has_engagement_bait,
+               json_extract_string(ga.result_json, '$.analysis.admirality') AS admirality,
+               json_extract_string(ga.result_json, '$.analysis.is_educational') = 'true' AS is_educational,
+               json_extract_string(ga.result_json, '$.analysis.is_actionable') = 'true' AS is_actionable,
+               json_extract_string(ga.result_json, '$.analysis.domain') AS domain,
+               json_extract_string(ga.result_json, '$.analysis.subdomain') AS subdomain,
+               json_extract_string(ga.result_json, '$.analysis.topic') AS topic,
+               json_extract_string(ga.result_json, '$.analysis.content_type') AS content_type,
+               json_extract_string(ga.result_json, '$.analysis.style') AS style,
+               json_extract_string(ga.result_json, '$.analysis.format') AS format,
+               json(ga.result_json) -> '$.analysis.educational_json' AS educational_json,
+               json(ga.result_json) -> '$.analysis.actionable_json' AS actionable_json,
+               json(ga.result_json) -> '$.analysis.transcript' AS transcript,
+               json(ga.result_json) AS result_json
+        FROM silver_posts sp
+        LEFT JOIN dim_profile dp ON sp.owner_id = dp.owner_id AND dp.is_current
+        LEFT JOIN dim_time dt ON CAST(sp.timestamp AS DATE) = dt.date
+        LEFT JOIN gold_analyses ga ON sp.post_id = ga.post_id AND ga.status = 'analysed'
+    """)
+
+    # 2. Profile stats
+    db.execute("""CREATE OR REPLACE VIEW profile_stats AS
+        SELECT sp.owner_id, dp.owner_username,
+               COUNT(*) AS post_count,
+               MIN(sp.timestamp) AS first_post_at, MAX(sp.timestamp) AS last_post_at,
+               AVG(sp.likes_count) AS avg_likes, AVG(sp.comments_count) AS avg_comments,
+               AVG(sp.video_play_count) AS avg_plays, AVG(sp.video_view_count) AS avg_views,
+               SUM(CASE WHEN sp.has_engagement_bait THEN 1 ELSE 0 END) AS bait_post_count,
+               LIST(DISTINCT sp.hashtags) AS all_hashtags
+        FROM silver_posts sp
+        JOIN dim_profile dp ON sp.owner_id = dp.owner_id AND dp.is_current
+        GROUP BY sp.owner_id, dp.owner_username
+    """)
+
+    # 3. Topic stats
+    db.execute("""CREATE OR REPLACE VIEW topic_stats AS
+        SELECT json_extract_string(ga.result_json, '$.analysis.domain') AS domain,
+               json_extract_string(ga.result_json, '$.analysis.topic') AS topic,
+               COUNT(*) AS post_count, COUNT(DISTINCT sp.owner_id) AS profile_count,
+               AVG(sp.likes_count) AS avg_likes, AVG(sp.comments_count) AS avg_comments
+        FROM gold_analyses ga
+        JOIN silver_posts sp ON ga.post_id = sp.post_id
+        WHERE ga.status = 'analysed' AND domain != ''
+        GROUP BY domain, topic
+    """)
+
+    # 4. Profile-topic edges
+    db.execute("""CREATE OR REPLACE VIEW profile_topic_edges AS
+        SELECT sp.owner_id, dp.owner_username,
+               json_extract_string(ga.result_json, '$.analysis.domain') AS domain,
+               json_extract_string(ga.result_json, '$.analysis.topic') AS topic,
+               COUNT(*) AS post_count, AVG(sp.likes_count) AS avg_likes,
+               AVG(sp.comments_count) AS avg_comments, MAX(sp.timestamp) AS last_post_at
+        FROM silver_posts sp
+        JOIN gold_analyses ga ON sp.post_id = ga.post_id AND ga.status = 'analysed'
+        JOIN dim_profile dp ON sp.owner_id = dp.owner_id AND dp.is_current
+        WHERE json_extract_string(ga.result_json, '$.analysis.domain') != ''
+        GROUP BY sp.owner_id, dp.owner_username, domain, topic
+    """)
+
+    # 5. Profile-resource edges (from actionable_json.resources)
+    db.execute("""CREATE OR REPLACE VIEW profile_resource_edges AS
+        SELECT sp.owner_id, dp.owner_username,
+               json_extract_string(r.value, '$.name') AS resource_name,
+               json_extract_string(r.value, '$.url') AS resource_url,
+               json_extract_string(r.value, '$.type') AS resource_type,
+               COUNT(*) AS post_count
+        FROM silver_posts sp
+        JOIN gold_analyses ga ON sp.post_id = ga.post_id AND ga.status = 'analysed'
+        JOIN dim_profile dp ON sp.owner_id = dp.owner_id AND dp.is_current,
+        json_each(json_extract(ga.result_json, '$.analysis.actionable_json.resources')) r
+        WHERE json_extract_string(r.value, '$.name') != ''
+        GROUP BY sp.owner_id, dp.owner_username, resource_name, resource_url, resource_type
+    """)
+
+    db.commit()
+    log.info("All views refreshed")
+    return {"views_created": 5}

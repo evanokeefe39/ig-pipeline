@@ -59,6 +59,15 @@ def _init_schema(conn: duckdb.DuckDBPyConnection) -> None:
             shortcode     TEXT,
             url           TEXT,
             caption       TEXT,
+            owner_id      TEXT,
+            owner_username TEXT,
+            likes_count   INTEGER,
+            comments_count INTEGER,
+            video_play_count INTEGER,
+            video_view_count INTEGER,
+            timestamp     TIMESTAMP,
+            hashtags      TEXT NOT NULL DEFAULT '[]',
+            has_engagement_bait BOOLEAN NOT NULL DEFAULT FALSE,
             media_files   TEXT NOT NULL DEFAULT '[]',
             media_count   INTEGER NOT NULL DEFAULT 0,
             source_dataset TEXT NOT NULL,
@@ -84,8 +93,42 @@ def _init_schema(conn: duckdb.DuckDBPyConnection) -> None:
             analysed_at    TIMESTAMP
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dim_time (
+            time_key      INTEGER PRIMARY KEY,
+            date          DATE NOT NULL,
+            month         INTEGER NOT NULL,
+            quarter       INTEGER NOT NULL,
+            year          INTEGER NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dim_profile (
+            profile_key   INTEGER PRIMARY KEY,
+            owner_id      TEXT NOT NULL,
+            owner_username TEXT NOT NULL,
+            follower_count INTEGER,
+            profile_category TEXT,
+            effective_from TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            effective_to   TIMESTAMP,
+            is_current     BOOLEAN NOT NULL DEFAULT TRUE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS taxonomy_terms (
+            term_id        INTEGER PRIMARY KEY,
+            term_type      TEXT NOT NULL,
+            raw_value      TEXT NOT NULL,
+            canonical_value TEXT NOT NULL,
+            similarity_score FLOAT,
+            review_status  TEXT NOT NULL DEFAULT 'self_mapped',
+            effective_from TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            effective_to   TIMESTAMP,
+            is_current     BOOLEAN NOT NULL DEFAULT TRUE,
+            merged_into_id INTEGER
+        )
+    """)
     conn.commit()
-
 
 def close() -> None:
     global _conn

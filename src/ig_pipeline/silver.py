@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 from pathlib import Path
 
 import duckdb
-
 from . import db as _db
 from .models import SilverResult
 
@@ -90,15 +90,29 @@ def deduplicate_all(*, db: duckdb.DuckDBPyConnection | None = None) -> SilverRes
             files_json = json.dumps(
                 sorted(f.name for f in media_dir.iterdir()) if posted_media else []
             )
+            hashtags_json = json.dumps(post.get("hashtags") or [])
+            has_bait = _detect_engagement_bait(post.get("caption") or "")
             db.execute(
                 """INSERT OR REPLACE INTO silver_posts
-                   (post_id, shortcode, url, caption, media_files, media_count, source_dataset)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (post_id, shortcode, url, caption, owner_id, owner_username,
+                    likes_count, comments_count, video_play_count, video_view_count,
+                    timestamp, hashtags, has_engagement_bait,
+                    media_files, media_count, source_dataset)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     post_id,
                     post.get("shortCode") or "",
                     (post.get("url") or "").strip(),
                     (post.get("caption") or "")[:5000],
+                    str(post.get("ownerId") or ""),
+                    post.get("ownerUsername") or "",
+                    post.get("likesCount") or 0,
+                    post.get("commentsCount") or 0,
+                    post.get("videoPlayCount") or 0,
+                    post.get("videoViewCount") or 0,
+                    post.get("timestamp") or None,
+                    hashtags_json,
+                    has_bait,
                     files_json,
                     posted_media,
                     dataset_id,
@@ -141,3 +155,26 @@ def _link_media(post_id: str, source_dataset: str, dest_dir: Path) -> int:
                 shutil.copy2(str(src), str(dest))
         count += 1
     return count
+
+
+_ENGAGEMENT_BAIT_PATTERNS = [
+    r"\bcomment\s+\w+",
+    r"\bDM\s+(me\s+)?\w+",
+    r"\bDM\b",
+    r"\blink\s+in\s+bio\b",
+    r"\bcheck\s+(my|the)\s+link\b",
+    r"\bdrop\s+a\s+\w+\s+below\b",
+    r"\bmessage\s+me\b",
+]
+
+_BAIT_RE = re.compile("|".join(_ENGAGEMENT_BAIT_PATTERNS), re.IGNORECASE)
+
+
+def _detect_engagement_bait(caption: str) -> bool:
+    """Return True if the caption contains known engagement-bait patterns.
+
+    Detects phrases like "comment GUIDE", "DM me for link", "link in bio",
+    "drop a comment below" — common funnel/gate tactics.
+    Runs on every silver post at zero LLM cost.
+    """
+    return bool(_BAIT_RE.search(caption))
