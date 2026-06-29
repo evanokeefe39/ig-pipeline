@@ -40,6 +40,7 @@ from . import db as _db
 from .apify import poll_run, trigger_run
 from .bronze import ingest_dataset
 from .gold import populate_dim_profile, refresh_views
+from .silver import deduplicate_all
 
 log = logging.getLogger(__name__)
 
