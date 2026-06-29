@@ -16,6 +16,15 @@ credibility signals, and 5 analytics views ready for querying.
 - 828 posts (3.8 GB) migrated from `scrape-ig-saved-list` to `ig-pipeline/data/`
 - 4 bronze JSONL datasets, media hardlinked into silver
 
+**Key finding — `metaData` field**: The Apify Instagram scraper includes a
+`metaData` object (followersCount, postsCount, biography, verified,
+businessCategoryName, relatedProfiles, externalUrl) when scraping **profile
+URLs** but NOT when scraping individual **post URLs**.  The main dataset
+(521 posts) was post-scraped → no metaData.  Newer datasets (301 posts)
+were profile-scraped → 3 profiles have real follower counts.  Phase 5
+strategy: feed all 369 owner profile URLs to the actor to backfill
+dim_profile.  No separate profile-scraper needed.
+
 ### Schema evolution
 - `silver_posts` expanded: engagement counts, owner info, hashtags, timestamp,
   `has_engagement_bait` (regex on caption — zero LLM cost)
