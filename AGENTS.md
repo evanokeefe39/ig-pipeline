@@ -29,6 +29,11 @@ Trigger: `/ig` — Claude imports `ig_pipeline` functions directly in `eval` cel
 - **Query** — DuckDB views (fact_post, profile_stats, topic_stats, edge views).
   Never query gold JSON directly.
 
+All layer directories are **env-overridable** for testing and ad-hoc analysis:
+``IG_DATA_DIR``, ``IG_BRONZE_DIR``, ``IG_SILVER_DIR``, ``IG_GOLD_DIR``,
+``IG_DB_PATH``. Set before import or call ``db._reset_dirs()`` to pick up
+changes mid-session. Default: ``data/`` under project root.
+
 ## State tracking
 
 DuckDB at `data/pipeline.db`. Tables:
