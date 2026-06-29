@@ -16,6 +16,11 @@ Trigger: `/ig` — Claude imports `ig_pipeline` functions directly in `eval` cel
 - Never use `pip`. Always use `uv` for Python package management.
 - Use `.venv` in the project root.
 
+- **PIPELINE FIRST**: Never manually chain `trigger_run`/`poll_run`/`ingest_dataset`
+  in eval cells. Use the pipeline scripts (`scripts/post_scrape.py`,
+  `scripts/profile_scrape.py`). If the pipeline can't express the workflow,
+  that IS the gap — extend the pipeline, don't work around it.
+
 ## Layer contract
 
 - **Bronze** — immutable raw ingest. Watermarked by run_id + actor. Never modifies after write.
@@ -77,6 +82,14 @@ Total reach: ~63M followers. 3 profiles missing (private/deleted).
 - **No per-profile watermarks**: rescraping fetches all posts each time.
   Evaluating dlt (data load tool) for incremental loading with cursor-based
   watermarks per profile source.
+
+- **Pipeline UX gaps**: The pipeline should accept flexible input configs
+  rather than requiring manual eval-cell orchestration:
+  - Profile scraping: accept a profile list + per-profile post limits (JSON
+    config or CLI arg), auto-farm to Apify batches within tier limits.
+  - Post scraping: accept a list of post URLs + max results, run through the
+    pipeline without manual trigger/poll/ingest chaining.
+  - Both should work identically for ad-hoc and scheduled use.
 
 ## Decisions (2026-06-29)
 
