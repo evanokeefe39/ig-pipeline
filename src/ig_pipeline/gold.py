@@ -651,6 +651,9 @@ def populate_dim_profile(*, db: duckdb.DuckDBPyConnection | None = None) -> int:
     For each owner, takes the latest post's metaData to populate
     follower_count, bio, is_verified, profile_category, related_profiles.
     Falls back to owner_id/owner_username only when no metaData exists.
+
+    This is a full rebuild — call once after all profile-scraping batches
+    complete to reflect the latest metaData from silver_posts.
     """
     if db is None:
         db = _db.get_db()
@@ -688,7 +691,6 @@ def populate_dim_profile(*, db: duckdb.DuckDBPyConnection | None = None) -> int:
     log.info("dim_profile seeded: %d profiles", count)
     db.commit()
     return count
-
 
 # ── Views ───────────────────────────────────────────────────────────────────
 

@@ -35,14 +35,14 @@ def run():
         ).fetchall()
     }
 
-    runs = list_runs("apify/instagram-scraper", token=token, limit=10)
+    runs = list_runs("shu8hvrXbJbY3Eb9W", token=token, limit=10)
     for run in runs:
         if run.status == "SUCCEEDED" and run.dataset_id and run.dataset_id not in ingested:
             result = ingest_dataset(
                 run.dataset_id,
                 token=token,
                 run_id=run.run_id,
-                actor="apify/instagram-scraper",
+                actor="shu8hvrXbJbY3Eb9W",
             )
             log.info("  bronze: %s → %d items", result.dataset_id, result.item_count)
 

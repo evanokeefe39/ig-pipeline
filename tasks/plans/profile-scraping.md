@@ -223,3 +223,18 @@ SELECT count(*) FROM dim_profile WHERE follower_count IS NOT NULL;
 Once posts are ingested and silvered, the `meta_data` column in `silver_posts`
 will contain profile metadata.  `populate_dim_profile` extracts the latest
 per owner already.
+
+## Automation module
+
+`src/ig_pipeline/profile_scrape.py` wraps the workflow above:
+
+- `query_profiles_needing_meta(db)` — read-only discovery: which profiles
+  lack follower_count in dim_profile
+- `run_batch(actor, usernames, results_limit, token)` — trigger, poll,
+  ingest a single batch of profile URLs
+- `run_all_batches(batches, token)` — run multiple (username_list,
+  results_limit) tuples in sequence
+- `backfill_after_batches(db)` — silver dedup + populate_dim_profile +
+  refresh_views; returns counts for each step
+
+Tests: `tests/test_profile_scrape.py` (8 tests, all passing).

@@ -50,9 +50,43 @@ then `refresh_views()` after enrichment.
 
 ## Profile metadata
 
-Raw Apify post data includes `ownerId`, `ownerUsername`, `ownerFullName` ONLY.
-Follower count, bio, profile category are NOT in post-scrape output.
-Phase 5 will require a separate Apify profile-scraper actor.
-`profile_stats` view computes aggregate stats from our scraped posts.
+Profile metadata (follower count, bio, category) is NOT available in post-scrape
+output (`resultsType: "posts"`). To get it, use the same Instagram Scraper actor
+with `resultsType: "details"` — returns one record per profile with `followersCount`,
+`biography`, `businessCategoryName`, `verified`, `externalUrl`, etc.
+
+Profile metadata is ingested directly into `dim_profile` via
+`populate_dim_profile_from_details()` (SCD2 — each scrape creates a new row with
+`effective_from`/`effective_to`). The post-scraping pipeline does NOT need to run
+for profile metadata — `resultsType: "details"` costs ~$0.99 for 368 profiles.
+
+**Current state (2026-06-29):** 368/371 profiles have follower counts (99%).
+Total reach: ~63M followers. 3 profiles missing (private/deleted).
+
+## Known issues / technical debt
+
+- **`stream_dataset` corrupts NDJSON**: large records with special characters in
+  bios produce truncated/invalid JSON lines. The bronze file for dataset
+  `o44ZGN3WOEuMzCgcf` had 154/498 lines broken. Workaround: fetch clean JSON
+  from Apify API directly and rewrite the bronze file.
+- **`deduplicate_all()` is monolithic**: processes ALL un-silvered datasets.
+  Cannot silver a single dataset ad-hoc. Needs decomposition into
+  `silver_dataset(dataset_id)`.
+- **No ETL orchestration framework**: tasks are manually chained in scripts.
+  No `PipelineRun` tracking, no retry, no scheduling.
+- **No per-profile watermarks**: rescraping fetches all posts each time.
+  Evaluating dlt (data load tool) for incremental loading with cursor-based
+  watermarks per profile source.
+
+## Decisions (2026-06-29)
+
+- **Profile metadata via `resultsType: "details"`**: the Instagram Scraper
+  actor supports this — cheaper and simpler than the separate profile-scraper
+  actor. One run handles all profiles (~$0.99 for 368).
+- **Profile data is SCD2**: follower counts change over time. Each scrape
+  creates a new `dim_profile` row with `effective_from`/`effective_to`.
+- **dlt evaluation**: dlt provides built-in incremental loading, watermarks,
+  and DuckDB support. Consider adopting for extraction layer, keeping the
+  medallion architecture underneath.
 
 ## Test conventions
