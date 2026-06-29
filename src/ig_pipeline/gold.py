@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # ── Config ──────────────────────────────────────────────────────────────────
 
 GEMINI_MODEL = "gemini-3.1-flash-lite"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Max carousel slides sent in a single multi-image request (cost / payload guard).
 MAX_SLIDES = 12
@@ -46,57 +46,117 @@ SUPPORTED_EXTENSIONS = {
 # ── Extraction prompt ───────────────────────────────────────────────────────
 
 PROMPT = """
-You are a knowledge extractor building a searchable knowledgebase from design,
-frontend, and creative-tooling social posts. You are given a post's media: a
-video, OR all slides of a carousel in order. Extract the REUSABLE KNOWLEDGE —
-the actual resources, steps, and tips — not a marketing teardown.
+You are a knowledge extractor analyzing social media posts. You are given a
+post's media: a video, OR all slides of a carousel in order.  Extract
+structured knowledge from the post.
 
-Return ONLY a valid JSON object with exactly these fields. No markdown fences,
-no explanation.
+Return ONLY a valid JSON object with exactly these fields. No markdown
+fences, no explanation.
 
 {
-  "is_educational":   boolean,
-  "value_score":      integer 1-5,
-  "content_type":     "resource_list|workflow|tutorial|tip|concept|showcase|promo|other",
-  "summary":          string,
-  "domains":          array from ["graphic_design","frontend","ui_ux","branding","typography",
-                                 "color","motion","illustration","photography","ai_tools",
-                                 "dev_tools","career","other"],
-  "resources":        array of { "name": string, "url": string,
-                                 "type": "tool|site|repo|library|framework|course|book|font|"
-                                         "template|asset|newsletter|community|other",
-                                 "purpose": string },
-  "workflow_steps":   array of strings (ordered; empty if not a process),
-  "tips":             array of strings (atomic, actionable; empty if none),
-  "concepts":         array of { "term": string, "explanation": string },
-
-  "tools_apps":       array of strings,
-  "people":           array of strings,
-  "tags":             array of 3-8 strings,
-
-  "gated_content":    boolean,
-  "gated_trigger":    string,
-  "transcript":       string
+  "is_educational":          boolean,
+  "is_actionable":           boolean,
+  "admirality":              string  (2 characters),
+  "domain":                  string,
+  "subdomain":               string,
+  "topic":                   string,
+  "subtopic":                string,
+  "content_type":            string,
+  "style":                   string,
+  "format":                  string,
+  "educational_json":        { ... },
+  "actionable_json":         { ... },
+  "transcript":              string
 }
 
 Field notes:
-- is_educational: true only if the post teaches something reusable (a resource,
-  method, or principle). Pure self-promo, hype, or showcase with no takeaway = false.
-- value_score: 5 = dense, specific, immediately useful (named tools+urls / concrete
-  steps). 1 = vague or no real takeaway. Use this to triage what enters the KB.
-- summary: 1-3 neutral sentences on what it actually teaches. No hype.
-- resources: every named tool/site/repo/etc. Read URLs off the slides exactly as
-  shown (e.g. "github.com/user/repo"). If a URL isn't shown, set url to "".
-  purpose = what it's for, in a few words. This is the highest-value field — be exhaustive.
-- workflow_steps: if it describes a process, list the steps in order.
-- tips: discrete, actionable pieces of advice, one per item.
-- concepts: terms/principles explained, with a short explanation each.
-- gated_content: true if the real resource is withheld behind an engagement gate
-  ("comment X and I'll DM you the link"). gated_trigger = the exact word/phrase, else "".
-- transcript: full enriched transcript. For video, transcribe speech and interleave
-  bracketed scene notes: "words [scene: ...] words". For a carousel, concatenate the
-  text of every slide in order, prefixed "[slide N] ". Be thorough — search substrate.
-- Empty string for missing strings, [] for missing arrays. Enum values must match exactly.
+
+is_educational — true if the post teaches something reusable: a method,
+principle, concept, or technique.  Pure showcase or hype = false.
+
+is_actionable — true if the post gives you something you can go do:
+install a tool, follow a guide, download an asset, apply a step.
+
+admirality — 2-character Admiralty Code.
+  First char = source reliability (who is speaking):
+    A = Practitioner — shows something they built/ran/designed
+    B = Expert — knowledgeable observer, industry insider
+    C = Curator — aggregator sharing others' work
+    D = Unknown — no track record visible in the post
+    E = Engagement baiter — content withheld behind a gate
+    F = Cannot assess
+  Second char = information credibility (what is claimed):
+    1 = Demonstrated — output shown working, you can see the result
+    2 = Probably true — consistent with known facts, logical
+    3 = Possibly true — plausible but unverified
+    4 = Opinion — subjective take, aesthetic preference
+    5 = Improbable — big claims without proof
+    6 = Cannot assess
+  Examples: "A1" = practitioner demonstrating verified results.
+            "E5" = engagement baiter with improbable claims.
+
+domain, subdomain, topic, subtopic — freeform strings.  No controlled
+vocabulary.  Be consistent across posts — reuse the same terms for
+similar content.
+
+content_type — freeform.  Describe the format naturally: "tutorial",
+"case study", "listicle", "product review", "behind the scenes".
+Not controlled.
+
+style — freeform.  Emotional/aesthetic vibe: "minimalist", "dark mode",
+"cinematic", "brutalist", "playful", "retro".
+
+format — freeform.  Structural presentation: "faceless video",
+"talking head", "carousel", "screen recording", "before/after".
+
+educational_json — what the post teaches.  Include only if
+is_educational is true.  Otherwise set to empty object {}.
+
+{
+  "summary":    string,
+  "workflow":   [{"step": string, "tool": string, "detail": string}],
+  "concepts":   [{"term": string, "explanation": string}],
+  "principles": [string],
+  "techniques": [string]
+}
+
+- summary: 1-2 sentences on what it teaches.  No hype.
+- workflow: ordered steps, if the post describes a process.
+  Each step can name a tool and give a detail.
+- concepts: key terms/principles explained.  One per entry.
+- principles: design/creative/technical principles taught.
+- techniques: specific techniques demonstrated.
+
+actionable_json — things the viewer can go do, get, or apply.
+Include only if is_actionable is true.  Otherwise set to empty
+object {}.
+
+{
+  "summary":    string,
+  "resources":  [{"name": string, "url": string, "type": string,
+                   "purpose": string}],
+  "tools":      [string],
+  "guides":     [string],
+  "downloads":  [{"name": string, "url": string}]
+}
+
+- summary: 1 sentence on what you can do.
+- resources: every named tool/site/repo/asset.  Read URLs exactly as
+  shown (e.g. "github.com/user/repo").  If no URL is shown, set to "".
+  type should be one of: "tool|site|repo|library|framework|course|book|
+  font|template|asset|newsletter|community|other".
+  purpose = what it's for, in a few words.  This is the highest-value
+  field — be exhaustive.
+- tools: tool/app names extracted from resources, for quick filtering.
+- guides: actionable instructions.
+- downloads: downloadable assets with their URLs.
+
+transcript — full enriched transcript.  For video, transcribe speech
+and interleave bracketed scene notes: "words [scene: ...] words".
+For a carousel, concatenate the text of every slide in order, prefixed
+"[slide N] ".  Be thorough — search the full content.
+
+Empty string for missing strings, [] for missing arrays.
 """.strip()
 
 
@@ -570,11 +630,21 @@ def refresh_views(*, db: duckdb.DuckDBPyConnection | None = None) -> dict:
             s.shortcode,
             s.url,
             s.caption,
-            json(g.result_json) AS result_json,
             g.analysed_at,
-            CAST(json_extract_string(g.result_json, '$.analysis.value_score') AS INTEGER) AS score,
+            json_extract_string(g.result_json, '$.analysis.is_educational') = 'true' AS is_educational,
+            json_extract_string(g.result_json, '$.analysis.is_actionable') = 'true' AS is_actionable,
+            json_extract_string(g.result_json, '$.analysis.admirality') AS admirality,
+            json_extract_string(g.result_json, '$.analysis.domain') AS domain,
+            json_extract_string(g.result_json, '$.analysis.subdomain') AS subdomain,
+            json_extract_string(g.result_json, '$.analysis.topic') AS topic,
+            json_extract_string(g.result_json, '$.analysis.subtopic') AS subtopic,
             json_extract_string(g.result_json, '$.analysis.content_type') AS content_type,
-            json_extract_string(g.result_json, '$.analysis.domains') AS domains
+            json_extract_string(g.result_json, '$.analysis.style') AS style,
+            json_extract_string(g.result_json, '$.analysis.format') AS format,
+            json(g.result_json) -> '$.analysis.educational_json' AS educational_json,
+            json(g.result_json) -> '$.analysis.actionable_json' AS actionable_json,
+            json(g.result_json) -> '$.analysis.transcript' AS transcript,
+            json(g.result_json) AS result_json
         FROM gold_analyses g
         JOIN silver_posts s USING (post_id)
         WHERE g.status = 'analysed'
