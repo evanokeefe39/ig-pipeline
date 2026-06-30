@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # ── Config ──────────────────────────────────────────────────────────────────
 
 GEMINI_MODEL = "gemini-3.1-flash-lite"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Max carousel slides sent in a single multi-image request (cost / payload guard).
 MAX_SLIDES = 12
@@ -46,57 +46,117 @@ SUPPORTED_EXTENSIONS = {
 # ── Extraction prompt ───────────────────────────────────────────────────────
 
 PROMPT = """
-You are a knowledge extractor building a searchable knowledgebase from design,
-frontend, and creative-tooling social posts. You are given a post's media: a
-video, OR all slides of a carousel in order. Extract the REUSABLE KNOWLEDGE —
-the actual resources, steps, and tips — not a marketing teardown.
+You are a knowledge extractor analyzing social media posts. You are given a
+post's media: a video, OR all slides of a carousel in order.  Extract
+structured knowledge from the post.
 
-Return ONLY a valid JSON object with exactly these fields. No markdown fences,
-no explanation.
+Return ONLY a valid JSON object with exactly these fields. No markdown
+fences, no explanation.
 
 {
-  "is_educational":   boolean,
-  "value_score":      integer 1-5,
-  "content_type":     "resource_list|workflow|tutorial|tip|concept|showcase|promo|other",
-  "summary":          string,
-  "domains":          array from ["graphic_design","frontend","ui_ux","branding","typography",
-                                 "color","motion","illustration","photography","ai_tools",
-                                 "dev_tools","career","other"],
-  "resources":        array of { "name": string, "url": string,
-                                 "type": "tool|site|repo|library|framework|course|book|font|"
-                                         "template|asset|newsletter|community|other",
-                                 "purpose": string },
-  "workflow_steps":   array of strings (ordered; empty if not a process),
-  "tips":             array of strings (atomic, actionable; empty if none),
-  "concepts":         array of { "term": string, "explanation": string },
-
-  "tools_apps":       array of strings,
-  "people":           array of strings,
-  "tags":             array of 3-8 strings,
-
-  "gated_content":    boolean,
-  "gated_trigger":    string,
-  "transcript":       string
+  "is_educational":          boolean,
+  "is_actionable":           boolean,
+  "admirality":              string  (2 characters),
+  "domain":                  string,
+  "subdomain":               string,
+  "topic":                   string,
+  "subtopic":                string,
+  "content_type":            string,
+  "style":                   string,
+  "format":                  string,
+  "educational_json":        { ... },
+  "actionable_json":         { ... },
+  "transcript":              string
 }
 
 Field notes:
-- is_educational: true only if the post teaches something reusable (a resource,
-  method, or principle). Pure self-promo, hype, or showcase with no takeaway = false.
-- value_score: 5 = dense, specific, immediately useful (named tools+urls / concrete
-  steps). 1 = vague or no real takeaway. Use this to triage what enters the KB.
-- summary: 1-3 neutral sentences on what it actually teaches. No hype.
-- resources: every named tool/site/repo/etc. Read URLs off the slides exactly as
-  shown (e.g. "github.com/user/repo"). If a URL isn't shown, set url to "".
-  purpose = what it's for, in a few words. This is the highest-value field — be exhaustive.
-- workflow_steps: if it describes a process, list the steps in order.
-- tips: discrete, actionable pieces of advice, one per item.
-- concepts: terms/principles explained, with a short explanation each.
-- gated_content: true if the real resource is withheld behind an engagement gate
-  ("comment X and I'll DM you the link"). gated_trigger = the exact word/phrase, else "".
-- transcript: full enriched transcript. For video, transcribe speech and interleave
-  bracketed scene notes: "words [scene: ...] words". For a carousel, concatenate the
-  text of every slide in order, prefixed "[slide N] ". Be thorough — search substrate.
-- Empty string for missing strings, [] for missing arrays. Enum values must match exactly.
+
+is_educational — true if the post teaches something reusable: a method,
+principle, concept, or technique.  Pure showcase or hype = false.
+
+is_actionable — true if the post gives you something you can go do:
+install a tool, follow a guide, download an asset, apply a step.
+
+admirality — 2-character Admiralty Code.
+  First char = source reliability (who is speaking):
+    A = Practitioner — shows something they built/ran/designed
+    B = Expert — knowledgeable observer, industry insider
+    C = Curator — aggregator sharing others' work
+    D = Unknown — no track record visible in the post
+    E = Engagement baiter — content withheld behind a gate
+    F = Cannot assess
+  Second char = information credibility (what is claimed):
+    1 = Demonstrated — output shown working, you can see the result
+    2 = Probably true — consistent with known facts, logical
+    3 = Possibly true — plausible but unverified
+    4 = Opinion — subjective take, aesthetic preference
+    5 = Improbable — big claims without proof
+    6 = Cannot assess
+  Examples: "A1" = practitioner demonstrating verified results.
+            "E5" = engagement baiter with improbable claims.
+
+domain, subdomain, topic, subtopic — freeform strings.  No controlled
+vocabulary.  Be consistent across posts — reuse the same terms for
+similar content.
+
+content_type — freeform.  Describe the format naturally: "tutorial",
+"case study", "listicle", "product review", "behind the scenes".
+Not controlled.
+
+style — freeform.  Emotional/aesthetic vibe: "minimalist", "dark mode",
+"cinematic", "brutalist", "playful", "retro".
+
+format — freeform.  Structural presentation: "faceless video",
+"talking head", "carousel", "screen recording", "before/after".
+
+educational_json — what the post teaches.  Include only if
+is_educational is true.  Otherwise set to empty object {}.
+
+{
+  "summary":    string,
+  "workflow":   [{"step": string, "tool": string, "detail": string}],
+  "concepts":   [{"term": string, "explanation": string}],
+  "principles": [string],
+  "techniques": [string]
+}
+
+- summary: 1-2 sentences on what it teaches.  No hype.
+- workflow: ordered steps, if the post describes a process.
+  Each step can name a tool and give a detail.
+- concepts: key terms/principles explained.  One per entry.
+- principles: design/creative/technical principles taught.
+- techniques: specific techniques demonstrated.
+
+actionable_json — things the viewer can go do, get, or apply.
+Include only if is_actionable is true.  Otherwise set to empty
+object {}.
+
+{
+  "summary":    string,
+  "resources":  [{"name": string, "url": string, "type": string,
+                   "purpose": string}],
+  "tools":      [string],
+  "guides":     [string],
+  "downloads":  [{"name": string, "url": string}]
+}
+
+- summary: 1 sentence on what you can do.
+- resources: every named tool/site/repo/asset.  Read URLs exactly as
+  shown (e.g. "github.com/user/repo").  If no URL is shown, set to "".
+  type should be one of: "tool|site|repo|library|framework|course|book|
+  font|template|asset|newsletter|community|other".
+  purpose = what it's for, in a few words.  This is the highest-value
+  field — be exhaustive.
+- tools: tool/app names extracted from resources, for quick filtering.
+- guides: actionable instructions.
+- downloads: downloadable assets with their URLs.
+
+transcript — full enriched transcript.  For video, transcribe speech
+and interleave bracketed scene notes: "words [scene: ...] words".
+For a carousel, concatenate the text of every slide in order, prefixed
+"[slide N] ".  Be thorough — search the full content.
+
+Empty string for missing strings, [] for missing arrays.
 """.strip()
 
 
@@ -557,28 +617,173 @@ def enrich_posts(
     return result
 
 
-# ── Views ───────────────────────────────────────────────────────────────────
 
-def refresh_views(*, db: duckdb.DuckDBPyConnection | None = None) -> dict:
-    """Create/replace DuckDB views over gold data."""
+
+# ── Dimension seeding ─────────────────────────────────────────────────────
+
+def populate_dim_time(*, db: duckdb.DuckDBPyConnection | None = None) -> int:
+    """Populate dim_time with dates covering all post timestamps."""
     if db is None:
         db = _db.get_db()
     db.execute("""
-        CREATE OR REPLACE VIEW posts AS
+        INSERT OR REPLACE INTO dim_time
+        WITH dates AS (
+            SELECT DISTINCT CAST(timestamp AS DATE) AS d
+            FROM silver_posts WHERE timestamp IS NOT NULL
+        )
         SELECT
-            g.post_id,
-            s.shortcode,
-            s.url,
-            s.caption,
-            json(g.result_json) AS result_json,
-            g.analysed_at,
-            CAST(json_extract_string(g.result_json, '$.analysis.value_score') AS INTEGER) AS score,
-            json_extract_string(g.result_json, '$.analysis.content_type') AS content_type,
-            json_extract_string(g.result_json, '$.analysis.domains') AS domains
-        FROM gold_analyses g
-        JOIN silver_posts s USING (post_id)
-        WHERE g.status = 'analysed'
+            CAST(STRFTIME(d, '%Y%m%d') AS INTEGER) AS time_key,
+            d AS date,
+            CAST(STRFTIME(d, '%m') AS INTEGER) AS month,
+            CAST((CAST(STRFTIME(d, '%m') AS INTEGER) - 1) / 3 + 1 AS INTEGER) AS quarter,
+            CAST(STRFTIME(d, '%Y') AS INTEGER) AS year
+        FROM dates WHERE d IS NOT NULL
     """)
+    count = db.execute("SELECT COUNT(*) FROM dim_time").fetchone()[0]
+    log.info("dim_time populated: %d dates", count)
     db.commit()
-    log.info("Views refreshed")
-    return {"views_created": 1}
+    return count
+
+
+def populate_dim_profile(*, db: duckdb.DuckDBPyConnection | None = None) -> int:
+    """Seed dim_profile from silver_posts, preferring metaData when available.
+
+    For each owner, takes the latest post's metaData to populate
+    follower_count, bio, is_verified, profile_category, related_profiles.
+    Falls back to owner_id/owner_username only when no metaData exists.
+
+    This is a full rebuild — call once after all profile-scraping batches
+    complete to reflect the latest metaData from silver_posts.
+    """
+    if db is None:
+        db = _db.get_db()
+    db.execute("DELETE FROM dim_profile")
+    db.execute("""
+        INSERT INTO dim_profile (
+            profile_key, owner_id, owner_username,
+            follower_count, posts_count_ig, bio, is_verified,
+            profile_category, external_url, related_profiles,
+            is_current, effective_from
+        )
+        WITH latest_post AS (
+            SELECT DISTINCT ON (owner_id)
+                owner_id, owner_username, meta_data, timestamp
+            FROM silver_posts
+            WHERE owner_id IS NOT NULL AND owner_id != ''
+            ORDER BY owner_id, timestamp DESC NULLS LAST
+        )
+        SELECT
+            ROW_NUMBER() OVER (ORDER BY lp.owner_id) AS profile_key,
+            lp.owner_id,
+            lp.owner_username,
+            CAST(json_extract_string(lp.meta_data, '$.followersCount') AS INTEGER) AS follower_count,
+            CAST(json_extract_string(lp.meta_data, '$.postsCount') AS INTEGER) AS posts_count_ig,
+            json_extract_string(lp.meta_data, '$.biography') AS bio,
+            json_extract_string(lp.meta_data, '$.verified') = 'true' AS is_verified,
+            json_extract_string(lp.meta_data, '$.businessCategoryName') AS profile_category,
+            json_extract_string(lp.meta_data, '$.externalUrl') AS external_url,
+            json_extract(lp.meta_data, '$.relatedProfiles') AS related_profiles,
+            true AS is_current,
+            CURRENT_TIMESTAMP AS effective_from
+        FROM latest_post lp
+    """)
+    count = db.execute("SELECT COUNT(*) FROM dim_profile").fetchone()[0]
+    log.info("dim_profile seeded: %d profiles", count)
+    db.commit()
+    return count
+
+# ── Views ───────────────────────────────────────────────────────────────────
+
+def refresh_views(*, db: duckdb.DuckDBPyConnection | None = None) -> dict:
+    """Create/replace all DuckDB analytical views over silver + gold data."""
+    if db is None:
+        db = _db.get_db()
+
+    # 1. Fact view
+    db.execute("""CREATE OR REPLACE VIEW fact_post AS
+        SELECT sp.post_id, dp.profile_key, dt.time_key,
+               sp.shortcode, sp.url,
+               sp.likes_count, sp.comments_count,
+               sp.video_play_count, sp.video_view_count,
+               CASE WHEN sp.video_view_count > 0
+                    THEN CAST(sp.video_play_count AS FLOAT) / sp.video_view_count END AS play_view_ratio,
+               CASE WHEN sp.likes_count > 0
+                    THEN CAST(sp.comments_count AS FLOAT) / sp.likes_count END AS comment_like_ratio,
+               ga.schema_version, sp.has_engagement_bait,
+               json_extract_string(ga.result_json, '$.analysis.admirality') AS admirality,
+               json_extract_string(ga.result_json, '$.analysis.is_educational') = 'true' AS is_educational,
+               json_extract_string(ga.result_json, '$.analysis.is_actionable') = 'true' AS is_actionable,
+               json_extract_string(ga.result_json, '$.analysis.domain') AS domain,
+               json_extract_string(ga.result_json, '$.analysis.subdomain') AS subdomain,
+               json_extract_string(ga.result_json, '$.analysis.topic') AS topic,
+               json_extract_string(ga.result_json, '$.analysis.content_type') AS content_type,
+               json_extract_string(ga.result_json, '$.analysis.style') AS style,
+               json_extract_string(ga.result_json, '$.analysis.format') AS format,
+               json(ga.result_json) -> '$.analysis.educational_json' AS educational_json,
+               json(ga.result_json) -> '$.analysis.actionable_json' AS actionable_json,
+               json(ga.result_json) -> '$.analysis.transcript' AS transcript,
+               json(ga.result_json) AS result_json
+        FROM silver_posts sp
+        LEFT JOIN dim_profile dp ON sp.owner_id = dp.owner_id AND dp.is_current
+        LEFT JOIN dim_time dt ON CAST(sp.timestamp AS DATE) = dt.date
+        LEFT JOIN gold_analyses ga ON sp.post_id = ga.post_id AND ga.status = 'analysed'
+    """)
+
+    # 2. Profile stats
+    db.execute("""CREATE OR REPLACE VIEW profile_stats AS
+        SELECT sp.owner_id, dp.owner_username,
+               COUNT(*) AS post_count,
+               MIN(sp.timestamp) AS first_post_at, MAX(sp.timestamp) AS last_post_at,
+               AVG(sp.likes_count) AS avg_likes, AVG(sp.comments_count) AS avg_comments,
+               AVG(sp.video_play_count) AS avg_plays, AVG(sp.video_view_count) AS avg_views,
+               SUM(CASE WHEN sp.has_engagement_bait THEN 1 ELSE 0 END) AS bait_post_count,
+               LIST(DISTINCT sp.hashtags) AS all_hashtags
+        FROM silver_posts sp
+        JOIN dim_profile dp ON sp.owner_id = dp.owner_id AND dp.is_current
+        GROUP BY sp.owner_id, dp.owner_username
+    """)
+
+    # 3. Topic stats
+    db.execute("""CREATE OR REPLACE VIEW topic_stats AS
+        SELECT json_extract_string(ga.result_json, '$.analysis.domain') AS domain,
+               json_extract_string(ga.result_json, '$.analysis.topic') AS topic,
+               COUNT(*) AS post_count, COUNT(DISTINCT sp.owner_id) AS profile_count,
+               AVG(sp.likes_count) AS avg_likes, AVG(sp.comments_count) AS avg_comments
+        FROM gold_analyses ga
+        JOIN silver_posts sp ON ga.post_id = sp.post_id
+        WHERE ga.status = 'analysed' AND domain != ''
+        GROUP BY domain, topic
+    """)
+
+    # 4. Profile-topic edges
+    db.execute("""CREATE OR REPLACE VIEW profile_topic_edges AS
+        SELECT sp.owner_id, dp.owner_username,
+               json_extract_string(ga.result_json, '$.analysis.domain') AS domain,
+               json_extract_string(ga.result_json, '$.analysis.topic') AS topic,
+               COUNT(*) AS post_count, AVG(sp.likes_count) AS avg_likes,
+               AVG(sp.comments_count) AS avg_comments, MAX(sp.timestamp) AS last_post_at
+        FROM silver_posts sp
+        JOIN gold_analyses ga ON sp.post_id = ga.post_id AND ga.status = 'analysed'
+        JOIN dim_profile dp ON sp.owner_id = dp.owner_id AND dp.is_current
+        WHERE json_extract_string(ga.result_json, '$.analysis.domain') != ''
+        GROUP BY sp.owner_id, dp.owner_username, domain, topic
+    """)
+
+    # 5. Profile-resource edges (from actionable_json.resources)
+    db.execute("""CREATE OR REPLACE VIEW profile_resource_edges AS
+        SELECT sp.owner_id, dp.owner_username,
+               json_extract_string(r.value, '$.name') AS resource_name,
+               json_extract_string(r.value, '$.url') AS resource_url,
+               json_extract_string(r.value, '$.type') AS resource_type,
+               COUNT(*) AS post_count
+        FROM silver_posts sp
+        JOIN gold_analyses ga ON sp.post_id = ga.post_id AND ga.status = 'analysed'
+        JOIN dim_profile dp ON sp.owner_id = dp.owner_id AND dp.is_current,
+        json_each(json_extract(ga.result_json, '$.analysis.actionable_json.resources')) r
+        WHERE json_extract_string(r.value, '$.name') != ''
+        GROUP BY sp.owner_id, dp.owner_username, resource_name, resource_url, resource_type
+    """)
+
+    db.commit()
+    log.info("All views refreshed")
+    return {"views_created": 5}

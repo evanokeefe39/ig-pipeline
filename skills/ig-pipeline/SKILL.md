@@ -38,27 +38,37 @@ Crash-safe: `silver_progress` table tracks dataset-level completion. Datasets ar
 ### Enrich (resumable, skips analysed, retries failed)
 ```
 from ig_pipeline.gold import enrich_posts, refresh_views
+from ig_pipeline.gold import populate_dim_time, populate_dim_profile
 
 enrich_posts()                           # all un-analysed posts
 enrich_posts(max_posts=50)               # first 50 un-analysed
 enrich_posts(post_ids=["id1","id2"])     # specific posts
-refresh_views()                          → {views_created: 1}
+
+# After enrichment, seed dimensions and refresh views:
+populate_dim_time()                      → int (date count)
+populate_dim_profile()                   → int (profile count)
+refresh_views()                          → {views_created: 5}
 ```
 - Gemini Flash model `gemini-3.1-flash-lite`
+- Gold v3 schema (SCHEMA_VERSION=3): Admiralty Code (A1-F6), freeform taxonomy,
+  educational_json + actionable_json
+- Silver detects engagement bait (regex on caption) — zero LLM cost
 - Async pipeline: TokenBucket (14 RPM), upload worker, generate worker with retry/backoff
 - `status='analysed'`: skipped on re-run
 - `status='failed'`: retried on re-run
 - Previous `enriched.json` archived to `data/archive/<post_id>/` before overwrite
 
-## Patterns
-
-### Ad-hoc: "scrape and analyze these profiles"
-1. `trigger_run("apify/instagram-scraper", ["url1","url2","url3"])` → note run_id
-2. `poll_run(run_id)` → note dataset_id
-3. `ingest_dataset(dataset_id, run_id=run_id, actor="apify/instagram-scraper", token=token)`
-4. `deduplicate_all()`
-5. `enrich_posts()`
-
+### Analytics (DuckDB views)
+```
+from ig_pipeline.gold import refresh_views
+refresh_views()
+# Then query via DuckDB:
+#   fact_post               — star schema (silver + gold + dims)
+#   profile_stats           — per-owner engagement aggregations
+#   topic_stats             — per-topic cross-profile aggregations
+#   profile_topic_edges     — graph export: profile → topic
+#   profile_resource_edges  — graph export: profile → resource
+```
 ### Batch: weekly scheduled pipeline
 Runs `scripts/run_pipeline.py` — queries recent Apify runs, skips ingested, upserts to silver, enriches.
 
