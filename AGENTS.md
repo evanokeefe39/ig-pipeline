@@ -83,18 +83,25 @@ Total reach: ~63M followers. 3 profiles missing (private/deleted).
   Cannot silver a single dataset ad-hoc. Needs decomposition into
   `silver_dataset(dataset_id)`.
 - **No ETL orchestration framework**: tasks are manually chained in scripts.
-  No `PipelineRun` tracking, no retry, no scheduling.
+  No `PipelineRun` tracking, no retry, no scheduling. Dagster migration planned
+  (see `issues.md` for migration plan). Surgical changes made to decouple
+  bronze downloads from DuckDB — the codebase is now Dagster-ready:
+  - `download_dataset()` writes files + sidecar, no DuckDB
+  - `bronze_ingests` table removed
+  - `--scrape-only` for parallel downloads
+  - `run_pipeline.py` is pure medallion processor
 - **No per-profile watermarks**: rescraping fetches all posts each time.
   Evaluating dlt (data load tool) for incremental loading with cursor-based
   watermarks per profile source.
 
 - **Pipeline UX gaps**: The pipeline should accept flexible input configs
   rather than requiring manual eval-cell orchestration:
-  - Profile scraping: accept a profile list + per-profile post limits (JSON
-    config or CLI arg), auto-farm to Apify batches within tier limits.
-  - Post scraping: accept a list of post URLs + max results, run through the
-    pipeline without manual trigger/poll/ingest chaining.
-  - Both should work identically for ad-hoc and scheduled use.
+  - Post scraping: `post_scrape.py` already handles ad-hoc lists via `--urls`,
+    `--urls-file`, or `--profile`. No gap.
+  - Profile scraping: module supports ad-hoc lists (`run_batch`) but CLI is
+    tier-only. Low priority.
+  - `resultsType: "details"` scraping: no CLI script chains trigger→poll→
+    ingest→populate. Deferred.
 
 ## Decisions (2026-06-29)
 
@@ -106,5 +113,28 @@ Total reach: ~63M followers. 3 profiles missing (private/deleted).
 - **dlt evaluation**: dlt provides built-in incremental loading, watermarks,
   and DuckDB support. Consider adopting for extraction layer, keeping the
   medallion architecture underneath.
+
+## Decisions (2026-06-30) — surgical changes
+
+- **Bronze layer decoupled from DuckDB**: `download_dataset()` writes `.jsonl`
+  + `.jsonl.meta` sidecar (run_id, actor, item_count). No DuckDB writes during
+  download. Enables parallel scraping without lock contention.
+- **`bronze_ingests` table removed**: bronze state is file-based. `silver.py`
+  scans `data/bronze/*.jsonl` instead of querying `bronze_ingests`.
+- **`--scrape-only` flag on `post_scrape.py`**: downloads files + sidecar only,
+  zero DuckDB. Multiple batches run in parallel.
+- **`run_pipeline.py` is pure medallion processor**: dedup → enrich → dim →
+  views. No Apify API calls (was mixing runs from other projects).
+
+## Dagster migration plan
+
+See `issues.md` for full migration plan (asset mapping, IO manager, config,
+execution model, and 8-step migration path). Key points:
+
+- Each current pipeline layer maps to one Dagster asset
+- DuckDB IO manager serializes writes per Dagster run process
+- Config class drives scraping parameters
+- Bronze file sidecars carry metadata through the asset graph
+- Migration is split into scoped steps — no big-bang rewrite
 
 ## Test conventions

@@ -112,17 +112,6 @@ def get_db(path: str | None = None) -> duckdb.DuckDBPyConnection:
 
 def _init_schema(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS bronze_ingests (
-            dataset_id    TEXT PRIMARY KEY,
-            run_id        TEXT NOT NULL,
-            actor         TEXT NOT NULL,
-            item_count    INTEGER NOT NULL DEFAULT 0,
-            file_path     TEXT NOT NULL,
-            checksum_sha256 TEXT,
-            ingested_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.execute("""
         CREATE TABLE IF NOT EXISTS silver_posts (
             post_id       TEXT PRIMARY KEY,
             shortcode     TEXT,

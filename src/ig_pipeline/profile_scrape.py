@@ -38,7 +38,7 @@ import duckdb
 
 from . import db as _db
 from .apify import poll_run, trigger_run
-from .bronze import ingest_dataset
+from .bronze import download_dataset
 from .gold import populate_dim_profile, refresh_views
 from .silver import deduplicate_all
 
@@ -117,11 +117,9 @@ def run_batch(
     )
 
     dataset_id = poll_run(run.run_id, token=token, poll_secs=poll_secs, timeout=timeout)
-
-    result = ingest_dataset(
-        dataset_id, token=token, run_id=run.run_id, actor=actor, db=db,
+    result = download_dataset(
+        dataset_id, token=token, run_id=run.run_id, actor=actor,
     )
-
     elapsed = time.monotonic() - t0
 
     summary: dict[str, object] = {
@@ -215,17 +213,12 @@ def populate_dim_profile_from_details(
     if db is None:
         db = _db.get_db()
 
-    # Find the bronze file
-    row = db.execute(
-        "SELECT file_path FROM bronze_ingests WHERE dataset_id = ?",
-        (dataset_id,),
-    ).fetchone()
-    if not row:
-        raise ValueError(f"Dataset {dataset_id} not found in bronze_ingests")
-
-    bronze_path = Path(row[0])
+    bronze_path = _db.BRONZE_DIR / f"{dataset_id}.jsonl"
     if not bronze_path.exists():
-        raise FileNotFoundError(f"Bronze file not found: {bronze_path}")
+        raise FileNotFoundError(
+            f"Bronze file not found: {bronze_path}\n"
+            f"Download first with download_dataset('{dataset_id}', token=..., run_id=..., actor=...)"
+        )
 
     # Collect profile metadata
     updates: list[tuple] = []

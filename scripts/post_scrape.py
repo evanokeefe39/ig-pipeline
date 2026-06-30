@@ -24,7 +24,7 @@ sys.path.insert(0, "src")
 from dotenv import load_dotenv
 
 from ig_pipeline.apify import poll_run, trigger_run
-from ig_pipeline.bronze import ingest_dataset
+from ig_pipeline.bronze import download_dataset, ingest_dataset
 from ig_pipeline.db import get_db
 from ig_pipeline.gold import enrich_posts, populate_dim_profile, refresh_views
 from ig_pipeline.silver import deduplicate_all
@@ -59,14 +59,15 @@ def cmd_scrape_posts(
     results_limit: int = 12,
     enrich: bool = False,
     dry_run: bool = False,
+    scrape_only: bool = False,
 ) -> None:
     """Scrape posts from the given URLs, ingest, and optionally enrich."""
     actor = ACTOR
-    print(f"\nScraping {len(urls)} URLs × {results_limit} posts each")
+    print(f"\nScraping {len(urls)} URLs \u00d7 {results_limit} posts each")
     print(f"  Est cost: ~${len(urls) * results_limit * 0.0023:.2f}")
 
     if dry_run:
-        print("  DRY RUN — no run triggered")
+        print("  DRY RUN \u2014 no run triggered")
         return
 
     # Step 1: Trigger
@@ -79,6 +80,12 @@ def cmd_scrape_posts(
     print("  Polling for completion...")
     dataset_id = poll_run(run.run_id, token=token, timeout=1200)
     print(f"  Run complete, dataset: {dataset_id}")
+
+    if scrape_only:
+        result = download_dataset(dataset_id, token=token, run_id=run.run_id, actor=actor)
+        print(f"  Downloaded: {result.item_count} items -> {result.path}")
+        print(f"  Dataset ID: {dataset_id}")
+        return
 
     # Step 3: Bronze
     result = ingest_dataset(
@@ -100,8 +107,6 @@ def cmd_scrape_posts(
     populate_dim_profile(db=db)
     refresh_views(db=db)
     print("  Dimensions + views refreshed")
-
-
 # ── CLI ───────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -111,20 +116,26 @@ def main() -> None:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--urls", nargs="+", help="Instagram post or profile URLs")
     group.add_argument("--urls-file", help="File with one URL per line")
-    group.add_argument("--profile", nargs="+", help="Instagram usernames (scrapes profile URLs)")
+    group.add_argument("--profile", nargs="+", help="Instagram usernames")
+    group.add_argument("--profiles-file", help="File with one username per line")
 
     parser.add_argument("--limit", type=int, default=12, help="Results limit per URL (default: 12)")
     parser.add_argument("--enrich", action="store_true", help="Run Gemini enrichment after silver")
     parser.add_argument("--dry-run", action="store_true", help="Preview without triggering")
+    parser.add_argument("--scrape-only", action="store_true", help="Download only, no DuckDB steps")
 
     args = parser.parse_args()
-
     if args.urls:
         urls = args.urls
     elif args.urls_file:
         with open(args.urls_file) as f:
             urls = [line.strip() for line in f if line.strip()]
         print(f"Read {len(urls)} URLs from {args.urls_file}")
+    elif args.profiles_file:
+        with open(args.profiles_file) as f:
+            usernames = [line.strip() for line in f if line.strip()]
+        urls = _build_urls_from_profiles(usernames)
+        print(f"Built {len(urls)} profile URLs from {len(usernames)} usernames in {args.profiles_file}")
     else:
         urls = _build_urls_from_profiles(args.profile)
         print(f"Built {len(urls)} profile URLs from {len(args.profile)} usernames")
@@ -139,6 +150,7 @@ def main() -> None:
         results_limit=args.limit,
         enrich=args.enrich,
         dry_run=args.dry_run,
+        scrape_only=args.scrape_only,
     )
 
 

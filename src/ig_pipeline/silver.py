@@ -32,21 +32,23 @@ def deduplicate_all(*, db: duckdb.DuckDBPyConnection | None = None) -> SilverRes
     if db is None:
         db = _db.get_db()
 
-    # Find un-silvered bronze datasets, ordered oldest-first so the latest
-    # dataset processes last and its INSERT OR REPLACE wins for shared post_ids.
-    rows = db.execute("""
-        SELECT b.dataset_id, b.file_path
-        FROM bronze_ingests b
-        WHERE b.dataset_id NOT IN (
-            SELECT source_dataset FROM silver_progress
-        )
-        ORDER BY b.ingested_at ASC
-    """).fetchall()
-
-    if not rows:
-        log.info("Nothing to silver")
-        return SilverResult()
-
+    # Discover bronze datasets by scanning the filesystem — no bronze_ingests table needed.
+    # Filter out datasets already recorded in silver_progress.
+    from . import db as _db
+    bronze_dir = _db.BRONZE_DIR
+    processed = {
+        r[0] for r in db.execute(
+            "SELECT source_dataset FROM silver_progress"
+        ).fetchall()
+    }
+    bronze_files = sorted(bronze_dir.glob("*.jsonl"),
+                          key=lambda p: p.stat().st_mtime)
+    rows = []
+    for f in bronze_files:
+        ds_id = f.stem
+        if ds_id not in processed:
+            rows.append((ds_id, str(f)))
+    log.info("Found %d un-silvered bronze datasets", len(rows))
     posts_silvered = 0
 
     for dataset_id, file_path in rows:

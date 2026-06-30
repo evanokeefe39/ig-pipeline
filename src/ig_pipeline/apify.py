@@ -143,36 +143,22 @@ def _stream_get(url: str, **params: Any) -> httpx.Response:
 
 
 def stream_dataset(dataset_id: str, dest: Path, *, token: str) -> int:
-    """Stream dataset via cursor pagination to ``dest`` as NDJSON.
+    """Download dataset to ``dest`` as NDJSON. Single request, no pagination.
 
-    Never holds the full dataset in memory. Returns item count.
-    Uses the ``?format=jsonl`` endpoint with cursor-based pagination.
+    Uses ``format=json`` (JSON array) to avoid the ``jsonl`` bug where
+    Apify's NDJSON output contains unescaped newlines in string values.
+    Parses the array, writes one JSON object per line.
+    Datasets are 2-5 MB so memory is not a concern.
     """
-    item_count = 0
-    cursor: str | None = None
+    import json as _json
+    url = f"{API_BASE}/datasets/{dataset_id}/items"
+    resp = _stream_get(url, format="json", token=token)
+    items = _json.loads(resp.text)
     with open(dest, "w", encoding="utf-8") as f:
-        while True:
-            params: dict[str, Any] = {
-                "format": "jsonl",
-                "token": token,
-                "limit": 500,
-            }
-            if cursor:
-                params["cursor"] = cursor
-            url = f"{API_BASE}/datasets/{dataset_id}/items"
-            resp = _stream_get(url, **params)
-            # Response body is NDJSON
-            for line in resp.iter_lines():
-                if line.strip():
-                    f.write(line + "\n")
-                    item_count += 1
-            pagination = resp.headers.get("x-apify-pagination-cursor") or \
-                         resp.headers.get("apify-pagination-cursor")
-            if not pagination:
-                break
-            cursor = pagination
-    log.info("Streamed %d items to %s", item_count, dest)
-    return item_count
+        for item in items:
+            f.write(_json.dumps(item, ensure_ascii=False) + "\n")
+    log.info("Streamed %d items to %s", len(items), dest)
+    return len(items)
 
 # ── Explore (read-only) ───────────────────────────────────────────────────
 
